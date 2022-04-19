@@ -260,6 +260,91 @@ private:
 
 ### 令operator=返回一个对\*this的引用
 
+连续赋值
+
+```c++
+x = y = z = 15;
+//其实就等于x = (y = (z = 15))；
+```
+
+为了实现来连续赋值，赋值操作符必须返回一个reference，指向操作符左侧实参
+
+```c++
+class Widget{
+public:
+    Widget& operator=(const Widget& rhs)
+    {
+    	...
+        return *this;
+    }
+    Widget& operator+=(const Widget& rhs){
+        ...
+        return *this;
+    }
+};
+```
+
+### 在operator=中处理自我赋值
+
+如果对象自己赋给自己，我们称之为自我赋值
+
+```c++
+w = w;
+a[i] = a[j]; //当i=j时，自我赋值
+*px = *py;	//px和py指向同一个物体时，自我赋值
+```
+
+在赋值操作中：
+
+1. 我们会先另左边的操作数先释放掉当前使用的数据
+2. 令其使用右操作数的副本
+3. 最后返回左操作数
+
+```c++
+class Widget{
+    ...
+private:
+    Bitmap *pb;
+};
+//!!!这个不安全
+Widget& Widget::operator=(const Widget& rhs){
+    delete pb;
+    pb = new Bitmap(*rhs.pb);
+    return *this;
+}
+```
+
+如果自我赋值，即rhs和pb指向同一个对象，那么`delete pb`后，这个对象就已经被销毁了，下面使用的`*rhs`就是一个已经被删除的对象
+
+解决方法1：延后delete
+
+```c++
+Widget& Widget::operator=(const Widget& rhs){
+    Bitmap* pOrig = pb;
+    pb = new Bitmap(*rhs.pb);
+    delete pOrig;
+    return *this;
+}
+```
+
+解决方法2：使用copy and swap技术
+
+```c++
+Widget& Widget::operator=(const Widget& rhs){
+    Widget temp(rhs);
+    swap(temp);		//令*this与temp交换
+    return *this;
+}
+```
+
+### 复制对象的一切
+
+
+
+
+
+
+
 
 
 
