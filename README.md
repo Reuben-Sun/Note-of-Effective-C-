@@ -1,0 +1,1 @@
+Note of Effective C++
