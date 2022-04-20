@@ -603,6 +603,68 @@ namespace WebBrowserStuff{
 - 可拆分
   - 用户可以把不同的非成员函数放在不同的头文件中，按需索取（而类必须完整定义，不可分割）
 
+### 如果所有参数都需要进行类型转换，使用非成员函数
+
+令类支持隐式类型转换是一个非常糟糕的主意，但如果每次都做显示转化又非常麻烦，尤其是当你在做一个数值运算的函数时
+
+比如一个有理数乘法
+
+```c++
+class Rational{
+public:
+  //这个类没有自定义的explict构造函数
+  const Rational opertaor* (const Rational& rhs) const;
+  ...
+};
+```
+
+```c++
+Rational oneEighth(1,8);
+Rational oneHalf(1,2);
+Rational result = oneHalf * oneEighth;	//成功
+result = result * oneEighth;	//成功
+result = oneHalf * 2;		//成功，等价于 result = oneHalf.operator*(2)
+result = 2 * oneHalf;		//失败，等价于 result = 2.operator*(oneHalf)
+```
+
+`result = oneHalf * 2;`为什么成功，因为这里发生了一次隐式转换，将`2`转化为了一个`Rational`类型
+
+在编译器中可能等价于
+
+```c++
+const Rational temp(2);
+result = oneHalf * temp;
+```
+
+- 如果这个类有自定义的explict构造函数，上面这几个运算都失败，因为无法将`2`转化为一个`Rational`类型
+
+`result = 2 * oneHalf;	`为什么会失败，因为隐式转换只能转换**参数列（parameter list）**内的参数，不能转化成员函数所隶属的对象（即this对象），此时`2`就是一个int类型，没有我们所自定义的`operator*`函数，自然会失败
+
+可以发现，想要实现混合运算，非常麻烦，但是如果把这个运算做成一个非成员函数，会好很多（因为所有的操作数都是参数，都在参数列中，都可以被隐式转换）
+
+```c++
+const Rational operator*(const Rational& lhs, const Rational& rhs){
+  return Rational(lhs.numerator() * rhs.numerator(), lhs.denominator() * rhs.denominator());
+}
+```
+
+- 此外要极力避免使用**友元（friend）函数**
+- 成员函数的对立面是非成员函数，一个函数不方便做成成员函数，要先考虑做成非成员函数
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
