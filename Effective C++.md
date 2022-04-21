@@ -653,9 +653,50 @@ const Rational operator*(const Rational& lhs, const Rational& rhs){
 
 
 
+### 写一个不抛异常的swap函数
 
+swap函数原本是STL的一部分，后来称为了**异常安全性编程**的核心，以及成为用来处理自我赋值的常见机制。总之swap很重要
 
+std是一个很特殊的命名空间，客户可以**全特化**（total template specialization)std里面的templates，但是不可以添加新的templates到std里面，std的内容完全由C++标准委员会决定
 
+全特化：针对某个类做模板函数的特例，如对`std::swap`做一个针对`Widget`的特化
+
+```c++
+class WidgetImpl{...};		//这个类的对象中存储着真正的数据
+class Widget{
+public:
+    Widget& operator=(const Widget& rhs){
+        ...
+        *pImpl = *(rhs.pImpl);
+        ...
+    }
+    ...
+    void swap(Widget& other){	//这个函数决对不可抛异常
+        using std::swap;
+        swap(pImpl, other.pImpl);//这是pimpl写法，交换两个对象只需要置换其pImpl指针
+    }
+    ...
+private:
+    WidgetImple* pImpl;		//这个类有一个指向资源对象的指针
+};
+namespace std{
+	template<>
+    void swap<Widget>(Widget& a, Widget& b){	//这个可以抛异常
+        a.swap(b);	
+    }
+}
+```
+
+此外，C++的STL容器就是上面这种写法，提供了`public swap`成员函数和`std::swap`的特化版本
+
+## 五：实现（Implementations）
+
+- 随意定义变量可能会导致性能降低
+- 过度使用转型（casts）可能会导致性能降低，难以维护，可读性低
+- 返回对象的内部数据的handles，可能会破坏封装
+- 未考虑异常可能会导致资源泄露和数据败坏
+- 过度使用inline可能会导致包体膨胀
+- 过度耦合（coupling）可能会增加构建时间（build times）
 
 
 
