@@ -698,6 +698,257 @@ namespace std{
 - 过度使用inline可能会导致包体膨胀
 - 过度耦合（coupling）可能会增加构建时间（build times）
 
+### 尽量延后变量定义式的出现时间
+
+#### 避免未曾使用的变量
+
+如果你定义了一个（类型中带有构造函数或析构函数的）变量，当程序的**控制流（control flow）**到达这个变量时，就会调用构造函数函数，当这个变量离开作用域时，就会调用析构函数，尽管这个变量没有被使用过
+
+此外，如果一个函数的中间代码抛了异常，那么前面的变量就有可能未被使用，白构造了、
+
+#### 避免无意义的默认构造函数
+
+如果你提前定义一个变量，这个变量可能会用默认构造函数构造，最后再赋值。这样不如将变量定义延后，用拷贝构造函数构造，这样性能会更好
+
+#### 循环
+
+此外，如果变量只在循环内使用，是将其定义在循环内呢？还是循环外？
+
+**循环内**
+
+```c++
+for(int i = 0; i < n; i++){
+  Widget w(...);
+  ...
+}
+```
+
+- n个构造函数+n个析构函数
+
+- 如果`Widget`是一个很敏感的类，这样会让其作用域更小，更容易理解和维护
+
+**循环外**
+
+```c++
+Widget w;
+for(int i = 0; i < n; i++){
+  w = ...;
+  ...
+}
+```
+
+- 一个构造函数+一个析构函数+n个赋值操作
+- 如果赋值成本比构造+析构要低，这样更好（尤其是n很大的时候）
+
+### 少做转型
+
+C++是强类型语言，设计目标应该是保证类型错误绝不发生，然而**类型转换**破坏了类型系统
+
+Java、C#，这些语言的类型转换比频繁，而且相对安全，但C++极具风险
+
+C++的类型转化
+
+- 旧式转换
+  - `(T)expression`
+  - `T(expression)`
+- 新式转换
+  - `const_cast<T>(expression)`
+    - 用于将对象的**常量性转除（cast away the constness）**
+    - 比如将`const`转化为`non-const`
+  - `dynamic_cast<T>(expression)`
+    - 用来**安全向下转型**
+    - 无法由旧式语句执行
+    - 耗费巨大
+  - `reinterpret_cast<T>(expression)`
+    - 用于低级转型，实际操作取决于编译器，不可移植
+    - 极其少用
+  - `static_cast<T>(expression)`
+    - 用于**强迫隐式转换（implicit conversions）**
+    - 比如`non-const`转化为`const`，`int`转化为`double`，`void*`转化为`typed`，基类指针转化为派生类指针
+
+避免C++类型转换出问题的核心是**避免使用基类的接口处理派生类**
+
+#### 一个对象多个地址
+
+C++很神奇，如果一个基类指针指向一个派生类对象，如
+
+```C++
+Dervied d;
+Base* b = &d;
+```
+
+这可能会导致两个指针值不一样，即这个对象有两个地址，一个`Derivied*`指针一个`Base*`指针，这派生类指针上往往会有一个**偏移量（offset）**，通过这个偏移量，可以通过派生类指针找到基类指针
+
+上面这种事在Java、C#、C中绝对不会发生，但是C++可以多继承，很容易出现这种情况（单继承时也会出现），所以**请不要假定对象在C++中如何布局**，更不应该基于这个假设对对象进行类型转换
+
+如果你想让当前对象调用基类的函数，如果对`*this`做强制转化，转换为基类，`*this`其实是先前产生的`*this`对象的基类部分，这个部分的成员函数可能与当前对象不同，最后导致调用函数出现问题
+
+```c++
+class SpecialWindow: public Window{
+public:
+  virtual void onResize(){
+    //static_cast<Window>(*this).onResize();	//这样不好
+    Window::onResize();		//请用这种方式调用基类的onResize函数（作用到当前对象上）
+    ...
+  }
+}
+```
+
+#### dynamic_cast
+
+这东西执行起来特别慢，尤其是操作深度继承和多重继承的对象
+
+什么时候使用这个东西？当**你想在**一个你认为是派生类对象的**对象上执行**派生类的操作**函数**，但你手里却只有一个指向基类的引用/指针时
+
+解决方法：
+
+- 使用类型安全容器（比如智能指针），存储指向派生类对象的指针，然后操作容器
+- 在基类中提供virtual函数
+
+### 避免返回指向对象内部成分的handles
+
+前面也写过，我们可以把数据分离出来，对象中只存一个指向数据的指针/引用，这样复制起来会更方便
+
+但是如果我们传递出指向对象的指针/引用，即使这个数据是private类型，但这个数据是可以会被修改的
+
+```c++
+class Point{
+public:
+  ...
+  void setX(int val);
+  ...
+};
+struct RectData{
+  Point ulhc;		//upper left hand corner
+  Point lrhc;		//lower right hand corner
+};
+class Rectangle{
+public:
+  ...
+  Point& upperLeft() const { return pData->ulhc; }	//这样返回了引用，非常不好
+  ...
+private:
+  std::trl::shared_ptr<RectData> pData;
+};
+...
+rec.upperLeft().setX(50);		//rec是一个Rectangle类型，我们发现这里居然实现了对Rectangle的修改
+```
+
+`upperLeft`函数本来只是为了提供给客户获得（get）`Rectangle`的一个坐标点，结果通过修改其指向/引用的对象。调用一个const函数，修改（set）了`Rectangle`本身，而且还是一个内部数据`RectData`
+
+为什么会出现这种情况呢？是因为成员函数返回了一个handles（包括指针、引用、迭代器）
+
+解决方法很简单，只要让handles不可以被修改，就可以了
+
+```c++
+class Rectangle{
+public:
+  ...
+  const Point& upperLeft() const { return pData->ulhc; }	
+  ...
+};
+```
+
+但这样还是返回了指向对象内部的handles，如果所指向的东西不存在，就会导致**dangling handles（空悬的号码牌）**，比如返回了一个对local变量的引用，依然特别危险
+
+当然，有的时候不得不返回handles，比如`operator[]`
+
+### 异常安全性很重要
+
+**异常安全性（Exception safety）**即当异常被抛出时，满足一下两个条件：
+
+- 不泄漏任何资源
+- 不允许数据败坏
+
+不泄漏资源比较好解决，前面已经做过使用对象管理资源了，而解决数据败坏比较复杂
+
+三个保证：
+
+- 基本承诺：如果异常被抛出，程序中任何事物仍保持在有效状态下，没有对象/数据结构/约束被破坏
+- 强烈保证：如果异常被抛出，程序状态不改变。即如果函数成功，则完全成功，如果函数失败，则返回调用函数前的状态（可以通过`copy-and-swap`实现）
+- 不抛掷（nothrow）：绝对不会抛出异常，任何情况下都能完美完成承诺的任务，比如内置类型int、指针等（但是很难实现）
+
+**异常安全码**必须提供上述三种保障之一，如果不能保障，则不具备异常安全性
+
+### 了解inline函数
+
+内联函数有很多优点，比如比宏好很多，也可以免除函数调用成本，此外编译器会对这部分代码做最优化
+
+缺点也很明显，会让包体变大，会导致**换页行为（paging）**，会降低cache命中率（如果内联函数很大的话），所以只适用于小型、频繁调用的函数
+
+内联函数一般放在头文件中，因为大多数建置环境，在编译时进行内联
+
+### 降低文件间的编译依存
+
+如果头文件内的代码被修改，所以使用这个头文件的文件也会被重新编译
+
+为什么C++要让类的实现放在定义式之中？其中一个重要因素是编译器必须在编译期间知道对象的大小，而知道对象大小的方法就是去访问定义式（这也是C++为什么需要先定义，后使用）
+
+这个问题在Java等语言中不存在，这些语言的实现类似于**pimpl（pointer to implementation）**写法，如果一个类中有一个自定义的数据类型，我们不需要知道这个类具体有多大，我们只需要分配一个指针大小的空间，让这个指针指向这个类
+
+*话说应该不会有人不知道implementation是实现的意思吧*
+
+```c++
+class PersonImpl;	//pimpl写法，这是Person类的前置声明
+class Data;				//Data的前置声明
+class Address;		//Address的前置声明
+
+class Persion{	//像这样使用pimpl的类，往往被称为Handle classes
+public:
+  ...
+  std::string name() const;
+  ...
+private:
+  std::trl::shared_ptr<PersonImpl> pImpl;
+};
+```
+
+在这种设计下，`Person`就与`Data`、`Address`以及`Persons`的实现分离了，改动这些类也不会导致使用`Person`的客户重新编译，客户无法看到`Person`的实现细节，真正实现**接口与实现分离**
+
+这个操作的本质是用**声明的依赖性**替换**定义的依赖性**
+
+此外最好为声明式和定义式提供不同的文件，比如把声明放在一个头文件中，引用这个头文件就可以快速引入多个声明
+
+此外还有另一种制作`Handle class`的方法，就是令`Person`成为一个特殊的抽象基类，称为`Interface class`，这个类没有成员变量，没有构造函数，单纯描述了几个纯虚函数和一个virtual析构函数。从功能上很接近C#、Java的Interfaces，但是更有弹性（比如可以在其中实现成员变量和成员函数）
+
+```c++
+class Person{		//Interface class
+public:
+  virtual ~Person();
+  virtual std::string name() const = 0;
+  ...
+};
+class Person{		//具现化
+public:
+  static std::trl::shared_ptr<Person> create(const std::string& name...);
+  ...
+};
+...
+//使用
+std::trl::shared_ptr<Person> pp(Person::create(name...));
+std::cout << pp->name();
+```
+
+```c++
+class RealPerson: public Person{	
+public:
+  RealPerson(const std::string& name, ...): theName(name), ...{}
+  virtual ~RealPerson() {}
+  std::string name() const;		
+  ...
+private:
+	std::string theName;
+};
+std::string ReakPerson::name(){...}
+std::trl::shared_ptr<Person> Person::create(const std::string& name, ...){
+  retrun std::trl::shared_ptr<Person>(new RealPerson(name, ...));
+}
+```
+
+## 六：继承与面向对象
+
+
+
 
 
 
