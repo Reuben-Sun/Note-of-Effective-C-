@@ -947,7 +947,205 @@ std::trl::shared_ptr<Person> Person::create(const std::string& name, ...){
 
 ## 六：继承与面向对象
 
+- `is-a`：是一个
+- `has-a`：有一个
+- `is-implemented-in-terms-of`：根据xx实现出
 
+### public继承是is-a关系
+
+```c++
+class Student: public Person{...};	//Student is a Person
+```
+
+每个学生都是人，但每个人不一定是学生，人这个概念更一般化，学生这个概念更特殊化
+
+**public继承下，可以把子类当父类用**，毕竟需要人的地方绝对可以接受一个学生，父类的函数可以对子类使用
+
+这就出现了一个问题，子类一定要`is a`父类，不然会出现问题
+
+错误的继承：
+
+- 企鹅是鸟（企鹅是鸟的派生类），鸟会飞（其实这句话是错的），所以企鹅会飞？
+- 正方形是矩形的特例，矩形可以自由调整长宽，所以正方形也可以自由调整长宽？
+
+### 避免遮掩父类成员
+
+```c++
+int x;
+void Fun(){
+    double x;
+    ...
+}
+```
+
+由于**作用域**的**名称遮掩规则**，函数内部的local变量x覆盖了全局变量x
+
+#### 子类名称会遮掩父类名称，在public继承下是错误的
+
+在OOP中，如果子类重载了父类的`non-virtual`函数，就意味着子类使用同名函数遮掩了父类函数，就意味着**这个父类函数没有被子类继承！**，那么在这种情况下，继承就不是`is-a`关系了
+
+**在public继承下，子类继承了父类的一切**
+
+```c++
+class Base{
+public:
+    virtual void f1() = 0;
+    virtual void f1(int);
+    void f2();
+    void f2(double);
+    ...
+private:
+    int x;
+};
+class Derived: public Base{
+public:
+    virtual void f1();
+    void f2();
+};
+...
+Derived d;
+int x;
+d.f1();		//正确，调用Derived::f1
+d.f1(x);	//错误，因为Derived::f1遮掩了Base::f1，而Derived::f1中没有f1(int)
+d.f2();		//正确，调用Derived::f2
+d.f2(x);	//错误，因为Derived::f2遮掩了Base::f2，而Derived::f2中没有f2(double)
+```
+
+#### 将被遮掩的名称重见天日
+
+解决起来很简单，只需要让父类的函数在子类作用域内可见，可以**使用using关键字**
+
+```c++
+class Derived: public Base{
+public:
+    using Base::f1;
+    using Base::f2;
+    virtual void f1();
+    void f2();
+};
+...
+Derived d;
+int x;
+d.f1();		//正确，调用Derived::f1
+d.f1(x);	//正确，调用Base::f1
+d.f2();		//正确，调用Derived::f2
+d.f2(x);	//正确，调用Base::f2
+```
+
+如果是private继承，子类只继承了父类的一部分，如果子类只想要父类的某一个函数，可以**使用转交函数**，这对象的作用就是不使用using关键字，实现让父类函数出现在子类作用域中
+
+```c++
+class Derived: private Base{
+public:
+    virtual void f1(){
+        Base::f1();		//inline转交函数
+    }
+    ...
+};
+...
+Derived d;
+int x;
+d.f1();		//正确，调用Derived::f1
+d.f1(x);	//错误，因为Derived::f1遮掩了Base::f1
+```
+
+### 区分接口继承和实现继承
+
+public继承分为两个部分
+
+- 函数接口继承
+- 函数实现继承
+
+|                 | 接口继承 | 实现继承         |
+| --------------- | -------- | ---------------- |
+| 纯虚函数        | 具体指定 | 不继承           |
+| 非纯虚函数      | 具体指定 | 继承一份缺省实现 |
+| non-virtual函数 | 具体指定 | 继承一份强制实现 |
+
+### 考虑使用virtual以外的选择
+
+#### 基于NVI的Template Method模式
+
+Non-Virtual Interface（NVI）流派主张virtual函数应该为private类型，让客户使用public non-virtual成员函数间接调用virtual函数
+
+```c++
+class GameCharacter{
+public：
+    int healthValue() const
+	{
+    	...
+    	int retVal = doHealthValue();
+    	...
+    	return retVal;
+	}
+private：
+    virtual int doHealthValue() const
+    {
+		...
+    }
+};
+```
+
+其中`healthValue()`被称为virtual函数的**外覆器（wrapper）**
+
+#### 基于函数指针的Strategy模式
+
+```c++
+class GameCharacter;
+int defaultHealthCalc(const GameCharacter& gc);
+class GameCharacter{
+public:
+    typedef int (*HealthCalcFunc)(const GameCharacter&);
+    explicit GameCharacter(HealthCalcFunc hcf = defaultHealthCalc): healthFunc(hcf){}
+    int healthValue() const { return healthFunc(*this); }
+    ...
+private:
+    HealthCalcFunc healthFunc;
+};
+```
+
+在这种模式下，`defaultHealthCalc`函数不再是`GameCharacter`体系内的成员函数，通过修改函数指针，就可以让`GameCharacter`使用不同种类的计算函数，弹性更强，而且可以在运行时变更
+
+此外`defaultHealthCalc`函数不需要/不能访问`GameCharacter`内的`non-public`部分，
+
+####  基于trl::function的Strategy模式
+
+上面使用函数指针，是为了将函数变成某个类似于函数的东西，比如函数指针，比如`trl::function`对象
+
+```c++
+class GameCharacter;
+int defaultHealthCalc(const GameCharacter& gc);
+class GameCharacter{
+public:
+    typedef std::trl::function<int (const GameCharacter&)> HealthCalcFunc;
+    explicit GameCharacter(HealthCalcFunc hcf = defaultHealthCalc): healthFunc(hcf){}
+    int healthValue() const { return healthFunc(*this); }
+    ...
+private:
+    HealthCalcFunc healthFunc;
+};
+```
+
+#### 古典的Strategy模式
+
+```c++
+class GameCharacter;
+class HealthCalcFunc{
+public:
+    ...
+    virtual int calc(const GameCharacter& gc) const{...}
+    ...
+};
+HealthCalcFunc defaultHealthCalc;
+class GameCharacter{
+public:
+    explicit GameCharacter(HealthCalcFunc* phcf = &defaultHealthCalc): pHealthFunc(phcf){}
+    int healthValue() const { return phealthFunc->calc(*this); }
+    ...
+private:
+    HealthCalcFunc* pHealthFunc;
+};
+```
 
 
 
