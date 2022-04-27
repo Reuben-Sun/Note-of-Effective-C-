@@ -364,7 +364,7 @@ C++的`auto_ptr`是一个**类指针（pointer-like）对象**，也就是**智�
 - 不要让多个`auto_ptr`指向同一个对象，因为一个对象被多次删除就会导致“未定义行为”
 - `auto_ptr`如果被复制，则原指针会指向null，新指针对获取对象的唯一拥有权
 
-**RCSP（引用计数型智能指针）**也是一种智能指针（比如`trl::shared_ptr`），会持续跟踪有多少对象指向某个资源，只有这个资源无人指向时，才会删除该资源
+**RCSP（引用计数型智能指针）**也是一种智能指针（比如`tr1::shared_ptr`），会持续跟踪有多少对象指向某个资源，只有这个资源无人指向时，才会删除该资源
 
 ### 小心copy行为
 
@@ -828,7 +828,7 @@ public:
   Point& upperLeft() const { return pData->ulhc; }	//这样返回了引用，非常不好
   ...
 private:
-  std::trl::shared_ptr<RectData> pData;
+  std::tr1::shared_ptr<RectData> pData;
 };
 ...
 rec.upperLeft().setX(50);		//rec是一个Rectangle类型，我们发现这里居然实现了对Rectangle的修改
@@ -899,7 +899,7 @@ public:
   std::string name() const;
   ...
 private:
-  std::trl::shared_ptr<PersonImpl> pImpl;
+  std::tr1::shared_ptr<PersonImpl> pImpl;
 };
 ```
 
@@ -920,12 +920,12 @@ public:
 };
 class Person{		//具现化
 public:
-  static std::trl::shared_ptr<Person> create(const std::string& name...);
+  static std::tr1::shared_ptr<Person> create(const std::string& name...);
   ...
 };
 ...
 //使用
-std::trl::shared_ptr<Person> pp(Person::create(name...));
+std::tr1::shared_ptr<Person> pp(Person::create(name...));
 std::cout << pp->name();
 ```
 
@@ -940,8 +940,8 @@ private:
 	std::string theName;
 };
 std::string ReakPerson::name(){...}
-std::trl::shared_ptr<Person> Person::create(const std::string& name, ...){
-  retrun std::trl::shared_ptr<Person>(new RealPerson(name, ...));
+std::tr1::shared_ptr<Person> Person::create(const std::string& name, ...){
+  retrun std::tr1::shared_ptr<Person>(new RealPerson(name, ...));
 }
 ```
 
@@ -1108,16 +1108,16 @@ private:
 
 此外`defaultHealthCalc`函数不需要/不能访问`GameCharacter`内的`non-public`部分，
 
-####  基于trl::function的Strategy模式
+####  基于tr1::function的Strategy模式
 
-上面使用函数指针，是为了将函数变成某个类似于函数的东西，比如函数指针，比如`trl::function`对象
+上面使用函数指针，是为了将函数变成某个类似于函数的东西，比如函数指针，比如`tr1::function`对象
 
 ```c++
 class GameCharacter;
 int defaultHealthCalc(const GameCharacter& gc);
 class GameCharacter{
 public:
-    typedef std::trl::function<int (const GameCharacter&)> HealthCalcFunc;
+    typedef std::tr1::function<int (const GameCharacter&)> HealthCalcFunc;
     explicit GameCharacter(HealthCalcFunc hcf = defaultHealthCalc): healthFunc(hcf){}
     int healthValue() const { return healthFunc(*this); }
     ...
@@ -1381,17 +1381,69 @@ public:
 
 最简单的方式是建立一个base class，令其包含所有正常形式的new和delete，然后继承这个基类，使用using表达式，再扩充new和delete
 
+## 九：杂项
 
+### 不要忽视编译器警告
 
+很多人忽视警告，毕竟一个问题如果真的很严重，应该报错
 
+比如下面这个错误，虽然只会报一个警告，但会导致错误的程序行为
 
+```c++
+class B{
+public:
+  virtual void f() const;
+};
+class D: public B{
+  virtual void f();
+};
+```
 
+报警告
 
+```c++
+warning: D::f() hides virtual B::f()
+```
 
+原本的目的是为了在D中重新定义virtual函数`f()`，但由于B中`f()`是const，在D中不是，此时B中的`f()`并没有在D中重新被声明，而是被整个遮掩了
 
+### 去熟悉标准程序库
 
+尤其是TR1
 
+#### C++98有什么
 
+- STL、容器（container）、迭代器（iterator）、算法（algorithm）、函数对象（function object）、容器适配器、函数对象适配器
+- Iostream
+- 国际化支持
+- 数值处理，包括复数（complex）和纯数值数组（valarray）
+- 异常阶层体系
+- C89标准程序库
+
+#### TR1有什么（全在`std::tr1`中）
+
+- 智能指针`tr1::shared_ptr`和`tr1::weak_ptr`
+- `tr1::function`
+- `tr1::bind`
+
+和（彼此无关的独立组件）
+
+- 哈希表
+- 正则表达式
+- Tuple变量组
+- `tr1::array`
+- `tr1::mem_fn`
+- `tr1::reference_wrapper`
+- 随机数生成工具
+- 数学特殊函数
+- C99兼容
+
+和（基于template）
+
+- Type traits
+- `tr1::result_of`
+
+### 熟悉Boost
 
 
 
