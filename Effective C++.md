@@ -1225,6 +1225,164 @@ virtual函数也是动态绑定的，具体调用哪一个函数取决于发出�
 
 ## 七：模版与泛型
 
+## 八：定制new和delete
+
+Java和C#等语言有自己内置的GC，但C++必须手动管理内存，这虽然麻烦，但是值得，尤其是一些设计苛刻的项目
+
+### new-handler
+
+当`operator new`无法分配内存时，会抛异常。在其抛异常前，会调用一个错误处理函数来处理内存不足的问题，即`new-handler`
+
+使用`set_new_handler`来指定`new-handler`
+
+```c++
+void outOfMem(){
+  std::cerr << "内存不足\n";
+  std::abort();
+}
+int main(){
+  std::set_new_handler(outOfMem);		//该函数的参数是一个函数指针
+  int* array = new int[10000000L];
+  ...
+}
+```
+
+当`operator new`无法满足内存申请时，会不断调用`new-handler`函数，直到找到足够的内存，所以`new-handler`函数应该满足
+
+- 让更多的内存可被使用
+  - 实现方法是程序开始时就分配一大块内存，每次调用`new-handler`时就释放一点点
+- 安装另一个`new-handler`
+  - 如果现在这个`new-handler`无法获取更多内存，需要知道哪一个`new-handler`具备增大内存的实力，然后使用`set_new_handler`来替换自己
+- 卸除`new-handler`
+  - 通过`set_new_handler`赋值`null`，将`new-handler`卸载，使得在内存分配不足时，会抛异常
+- 抛出`bad_alloc`异常
+  - 这种异常不会被`operator new`捕获，会被传播至内存索求处
+- 不反回
+  - 调用`abort`或者`exit`
+
+```c++
+class NewHandlerHolder{
+public:
+  explicit NewHandlerHolder(std::new_handler nh): handler(nh) {}	//获取当前的new_handler
+  ~NewHandlerHolder() { std::set_new_handler(handler); }	
+private:
+  std::new_handler handler;		//用于记录当前的new_handler
+};
+void* Widget::operator new(std::size_t size) throw(std::bad_alloc){
+  NewHandlerHolder h(std::set_new_handler(currentHandler));	//安装Widget的new-handler
+  return ::operator new(size);	//分配对象或者抛异常
+}
+//离开这个函数的声明周期时，NewHandlerHolder被析构，new-handler恢复之前的值
+```
+
+```c++
+void outOfMem();
+Widget::set_new_handler(outOfMem);
+Widget* pwl = new Widget;	//内存不足时会调用outOfMem
+```
+
+mixin风格的写法
+
+```c++
+template<typename T>
+class NewHandlerSupport{
+public:
+  static std::new_handler_set set_new_handler(std::new_handler p) throw();
+  static void* operator new(std::size_t size) throw(std::bad_alloc);
+  ...
+private:
+  static std::new_handler currentHandler;
+};
+
+template<typename T>
+std::new_handler NewHandlerSupport<T>::set_new_handler(std::new_handler p) throw(){
+  std::new_handler oldHandler = currentHandler;
+  currentHandler = p;
+  return oldHandler;
+}
+
+template<typename T>
+void* NewHandlerSupport<T>::operator new(std::size_t size) throw(std::bad_alloc){
+  NewHandlerHolder h(std::set_new_handler(currentHandler));
+  return ::operator new(size);
+}
+```
+
+```c++
+class Widget: public NewHandlerSupport<Widget>{
+	...
+};
+```
+
+像这样，一个类继承于一个模版基类，而且这个模版基类以这个类作为类型参数，被称为**怪异的循环模版模式（curiously recurring template pattern，CRTP）**
+
+### 替换new和delete的时机
+
+C++中所有的news返回的指针都必须要**地址对齐**，int要4对齐，double要8对齐
+
+写一个好的new很难，只有当你想改善效能、对heap运行作物进行调试、收集heap使用信息等时才对其进行替换
+
+### 编写new和delete的规则
+
+如果你真的需要自己写一个new/delete，那就写吧，只不过要符合一些规则
+
+- new
+  - 应该内含一个无穷循环，在其中尝试分配内存，点那个无法满足内存需求时，调用`new-handler`
+  - 有能力处理0 bytes申请（比如将0 bytes申请视为1 bytes申请）
+  - new可能会被继承，而派生类的大小可能会比基类大，需要对其做处理（比如改用标准new），即处理**比正确大小更大的（错误）申请**
+
+- delete
+  - 收到null指针时不做任何事
+  - 处理**比正确大小更大的（错误）申请**
+
+### 编写new时也要写对应的delete
+
+```c++
+Widget* pw = new Widget;
+```
+
+在这里调用了两个函数，一个时用以分配内存的`operator new`，一个是`Widget`的构造函数
+
+如果构造函数调用异常，pw将不会被赋值，客户手中将不会有指针指向之前分配的内存。但如果不释放那个内存，就会导致内存泄漏。所以释放内存是交给C++运行时系统的
+
+运行时系统会调用`operator new`所对应的`operator delete`来释放地址，对于拥有正常签名式的new和delete来说不成问题
+
+```c++
+void* operator new(std::size_t) throw(std::bad_alloc);	//普通的new
+void operator delete(void* rawMemory) throw();	//global中的普通的new
+void operator delete(void* rawMemory, std::size_t size) throw();	//class中的new
+```
+
+但当你自定义了一个new，却同时写了一个普通形式的delete，就会出现问题
+
+```c++
+void* operator new(std::size_t, void* pMemory) throw();	//placement new，比普通new多带一个参数
+
+Widget* pw = new (std::cerr) Widget;	//调用operator new，并以cerr作为其实参
+```
+
+当内存分配成功，而构造函数出现异常时，运行时系统有责任取消内存分配，并恢复旧观，但现在运行时系统无法知道真正被调用的`operator new`时如何运作的，所以运行时系统会去寻找**参数个数与类型**都与`operator new`相同的某个`operator delete`
+
+```c++
+void operator delete(void*, std::ostream&) throw();	//palcement delete
+```
+
+```c++
+class Widget{
+public:
+  static void* operator new(std::size_t size, std::ostream& logStream) throw(std::bad_alloc);
+  static void operator delete(void* pMemory) throw();
+  static void operator delete(void* pMemoty, std::ostream& logStream) throw();
+  ...
+};
+```
+
+如果此时调用`delete pw`，只会调用普通的`delete`，因为只有在构造时发生异常时，运行时系统才会调用placement delete
+
+最简单的方式是建立一个base class，令其包含所有正常形式的new和delete，然后继承这个基类，使用using表达式，再扩充new和delete
+
+
+
 
 
 
