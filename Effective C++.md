@@ -1225,6 +1225,224 @@ virtual函数也是动态绑定的，具体调用哪一个函数取决于发出�
 
 ## 七：模版与泛型
 
+模板（templates）是泛型编程（generic programming）的基础
+
+模板机制是一个完整的图灵机（Turing-complete），引出了模板元编程（template metaprogramming， TMP），在编译时TMP从templates中具现出若干C++代码，这些代码会被编译期正常编译
+
+### 评价
+
+优点：
+
+1. 模板编程能够实现非常灵活且类型安全的接口
+2. 极好的性能（更小的文件、更短的运行期，更少的内存需求）
+3. 可以将一些运行时才能侦测到的错误，在编译期找出来
+
+缺点：
+
+1. 难以编程和维护
+2. 编译报错信息难以理解
+3. 难以重构
+4. 编译时间大幅变长
+
+因此C++模板一般只用在少量高频使用的基础组件，不要写太复杂的，也不将模板暴露出去（用户不会用，就不给他们用），写好注释
+
+### 隐式接口和编译期多态
+
+- OOP中经常使用显式接口和运行时多态
+- 泛型编程更多使用隐式接口和编译期多态
+
+```C++
+template<typename T>
+void doProcessing(T& w)
+{
+    if(w.size() > 10 && w != someNastyWidget){
+        T temp(w)
+        temp.normalize();
+        temp.swap(w);
+    }
+}
+```
+
+从这个例子来看，t的类型应该必须支持size、normalize、swap等函数，这些函数就是一组**隐式接口**
+
+所有涉及t的函数调用，都有可能造成template的具现化（instantiated），使得这些调用能够成功
+
+这种具现化行为出现在编译期，”以不同的template参数具现化function template“会导致调用不同的函数，这就是**编译期多态**
+
+### Traits
+
+一种约定俗成的技术方案，为同一类数据提供统一的操作函数
+
+比如我们想实现一个通用的decode()，我们不可能每自定义一个类，就重载一次函数，我们可以使用模板来实现。
+
+```C++
+enum Type{
+    TYPE_1;
+    TYPE_2;
+};
+class FOO{
+    Type type = Type::TYPE_1;
+};
+class Bar{
+    Type type = Type::TYPE_2;
+};
+//统一的模板函数
+template<typename T>
+void decode(const T& data, char* buf){
+    if(T::type == Type::TYPE_1){
+        ...
+    }
+    else if(T::type == Type::TYPE_2){
+        ...
+    }
+}
+```
+
+但是对于系统内置的变量，我们无法对其进行修改，于是我们引入了traits技术
+
+```C++
+enum Type{
+    TYPE_1;
+    TYPE_2;
+};
+class FOO{
+    Type type = Type::TYPE_1;
+};
+class Bar{
+    Type type = Type::TYPE_2;
+};
+
+template<typename T>
+struct type_traits{
+    Type type = T::type;
+}
+//为内置数据类型特化为独有的 type_traits
+template<typename int>
+struct type_traits{
+    Type type = Type::TYPE_1;
+}
+//统一的模板函数
+template<typename T>
+void decode(const T& data, char* buf){
+    if(type_traits<T>::type == Type::TYPE_1){
+        ...
+    }
+    else if(type_traits<T>::type == Type::TYPE_2){
+        ...
+    }
+}
+```
+
+该技术使得类型测试在编译期可用，将类型测试放在编译期，可以使得测试代码不进入可执行文件中，这也就是将类型测试的工作量从运行时转到编译期，这也就是为什么TMP能以牺牲编译时长为代价，提高代码运行效率的原因
+
+### 模板元编程
+
+TMP是一个函数式语言，这类语言经常使用递归。函数式语言的递归不涉及函数调用，而是递归模板具现化
+
+如果一门语言具备以下功能，则称为图灵完全
+
+1. 数值运算和符号运算
+2. 判断
+3. 递归
+
+#### 数值运算+递归
+
+```C++
+//一个TMP计算阶乘，而且阶乘的技术发生在编译期
+template<unsigned n>
+struct Factorial
+{
+    enum { value = n * Factorial<n-1>::value };
+};
+template<>
+struct Factorial<0>
+{
+    enum { value = 1 };
+};
+
+int main()
+{
+    std::cout << Factorial<5>::value;
+}
+```
+
+C++11TMP这种函数式编程得到了加强，上文也可以这样写
+
+```C++
+template<unsigned n>
+struct Factorial
+{
+    constexpr static auto value{ n * Factorial<n - 1>::value };
+};
+template<>
+struct Factorial<0>
+{
+    constexpr static auto value = 1;
+};
+```
+
+#### 判断
+
+```C++
+template<bool Value>
+struct if_constexpr
+{
+    constexpr static auto value = 1;
+};
+
+template<>
+struct if_constexpr<false> {
+    constexpr static auto value = 2;
+};
+
+int main()
+{
+    std::cout << if_constexpr<true>::value << std::endl;
+    std::cout << if_constexpr<false>::value << std::endl;
+}
+```
+
+### typedef
+
+在泛型编程中，typedef也很常用，他的作用很多，其中有一个是为复杂声明定义一个简单的别名
+
+下面是一个函数指针的示例
+
+```C++
+void add(int x, int y) {
+    std::cout << "x+y=" << x + y << std::endl;
+}
+void dec(int x, int y) {
+    std::cout << "x-y=" << x - y << std::endl;
+}
+void mul(int x, int y) {
+    std::cout << "x*y=" << x*y << std::endl;
+}
+
+void (*op[3])(int, int) = { add, dec, mul };
+
+int main()
+{
+    for (int i = 0; i < 3; ++i) {
+        （*op[i])(4, 3);
+    }
+}
+```
+
+如果使用typedef
+
+```C++
+typedef void (*Func[3])(int, int);
+Func f = { add, dec, mul };
+
+int main()
+{
+    for (int i = 0; i < 3; ++i) {
+        f[i](4, 3);
+    }
+}
+```
+
 ## 八：定制new和delete
 
 Java和C#等语言有自己内置的GC，但C++必须手动管理内存，这虽然麻烦，但是值得，尤其是一些设计苛刻的项目
